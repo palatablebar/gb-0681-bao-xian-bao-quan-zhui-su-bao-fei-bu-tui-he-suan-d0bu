@@ -1,4 +1,4 @@
-import importlib,os
+import importlib,base64,json
 from flask import Flask,jsonify,request,redirect,Response
 from app.config import MODULES
 from app.errors import DomainError
@@ -9,6 +9,7 @@ from app.modules.m7_archive.export_out import bundle
 
 def create_app():
     app=Flask(__name__);app.config['MAX_CONTENT_LENGTH']=2_000_000
+    app.add_template_filter(lambda value: json.dumps(value,ensure_ascii=False,indent=1),'payload_json')
     for entry in MODULES:app.register_blueprint(importlib.import_module('app.modules.'+entry[0]+'.handler').bp)
     @app.errorhandler(DomainError)
     def domain_error(error):return jsonify(code=error.code,message=error.message),error.status
@@ -30,6 +31,23 @@ def create_app():
         data=request.get_json(silent=True) or {}
         if not isinstance(data.get('version'),int):raise DomainError('VERSION','请提交复核版本')
         return jsonify(store.review(run_id,data['version'],data.get('decision')))
+    @app.post('/api/runs/<run_id>/remittance')
+    def replace_remittance(run_id):
+        """替换某批次的来账分配。
+
+        成功时生成接替批次并保留旧版；版本不符、批次已替换或重算校验失败，
+        旧正文与旧分配原样保留，不会出现半笔新分配。
+        """
+        data=request.get_json(silent=True) or {}
+        if not isinstance(data.get('version'),int):raise DomainError('VERSION','请提交替换版本')
+        if not isinstance(data.get('remittances'),list):raise DomainError('PARAMETERS','remittances 必须是数组')
+        stored=store.get(run_id)
+        content=base64.b64decode(stored['source_b64'])
+        parameters=dict(stored.get('manifest',{}).get('parameters',{}) or {})
+        parameters['remittances']=data['remittances']
+        # 先完整重算并校验，任何异常都在写入前抛出；旧版因此原样保留。
+        state=run(content,parameters)
+        return jsonify(store.replace(run_id,state,data['version']))
     @app.get('/api/archive/<run_id>/export.csv')
     def download(run_id):
         state=store.get(run_id)

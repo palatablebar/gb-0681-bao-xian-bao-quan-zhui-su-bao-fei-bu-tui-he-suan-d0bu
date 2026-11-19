@@ -20,6 +20,15 @@ docker compose up --build -d
 - 补退对账：`/m6_reconcile`、`/api/m6_reconcile`
 - 结案归档：`/m7_archive`、`/api/m7_archive`
 
+## 银行来账
+
+`POST /api/runs` 的 `parameters.remittances` 可带入一笔或多笔银行来账（`id`、`amount`、`date`、`memo`、`policies`、`allocations`）。
+只有附言/清单中列出的已采信保单才吸收来账，且每张保单不超过应补额；无法说明归属的余额全部暂挂，
+不回摊到已匹配保单。整笔到账 = 已分配 + 暂挂。M6 工作台、M7 结案页与 `/api/archive/<id>/export.csv` 共用同一份分配结果。
+替换来账用 `POST /api/runs/<id>/remittance`（须带当前 `version`）：成功时生成接替批次，旧批次保留且仍可下载；
+版本不符、已替换或校验失败时旧版原样保留；重复导入同一来账不增加已分配金额。
+示例：`sample_data/remittance.json`。
+
 ## 核心规则
 
 按保全有效日拆分责任区间，撤销回滚指向原变更；实收补退按日精确分配尾差。完整数值、边界和异常定义见 `docs/DATA-DICTIONARY.md`。
